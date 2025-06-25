@@ -55,6 +55,12 @@ bash setup.sh
 
 [example.env](example.env)を参考に`.env`ファイルを作成：
 
+```bash
+cp example.env .env
+```
+
+`.env`ファイルを編集して、以下の環境変数を設定します：
+
 ```env
 DISCORD_TOKEN=your_discord_token_here
 SSH_HOST=your_server_ip_here
@@ -72,17 +78,6 @@ BROADCAST_IP=your_broadcast_ip_here
 | SSH_USER      | SSH 接続ユーザー名                         |
 | TARGET_MAC    | Wake-on-LAN 対象デバイスの MAC アドレス    |
 | BROADCAST_IP  | Wake-on-LAN のブロードキャスト IP アドレス |
-
-もしくは、環境変数を直接設定することもできます。
-
-```bash
-export DISCORD_TOKEN=your_discord_token_here
-export SSH_HOST=your_server_ip_here
-export SSH_PORT=your_ssh_port_here
-export SSH_USER=your_ssh_username_here
-export TARGET_MAC=your_target_mac_here
-export BROADCAST_IP=your_broadcast_ip_here
-```
 
 ### 3. サーバー設定
 
@@ -121,12 +116,11 @@ bash start.sh
 
 1. [mamepower.service](mamepower.service)を自分の環境に合わせて編集
 
-   - `WorkingDirectory` をプロジェクトのパスに変更
-   - `ExecStart` を`start.sh`のパスに変更
+   - `WORKING_DIR` を実行ディレクトリに合わせて変更
    - `User` を実行ユーザーに合わせて変更
 
-2. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
-3. サービスを有効化：
+1. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
+1. サービスを有効化：
 
 ```bash
 sudo cp mamepower.service /etc/systemd/system/
