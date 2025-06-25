@@ -4,10 +4,9 @@ After=network.target
 
 [Service]
 Type=simple
-Environment="WORKING_DIR=/home/sasnews/mamepower"
-WorkingDirectory=${WORKING_DIR}
-ExecStart=/bin/bash ${WORKING_DIR}/start.sh
-EnvironmentFile=${WORKING_DIR}/.env
+WorkingDirectory=/home/sasnews/mamepower
+ExecStart=/bin/bash /home/sasnews/mamepower/start.sh
+EnvironmentFile=/home/sasnews/mamepower/.env
 Restart=always
 RestartSec=10
 User=sasnews

@@ -116,11 +116,13 @@ bash start.sh
 
 1. [mamepower.service](mamepower.service)を自分の環境に合わせて編集
 
-   - `WORKING_DIR` を実行ディレクトリに合わせて変更
+   - `WorkingDirectory` をプロジェクトのパスに変更
+   - `ExecStart` を `start.sh` のパスに変更
+   - `EnvironmentFile` を `.env` ファイルのパスに変更
    - `User` を実行ユーザーに合わせて変更
 
-1. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
-1. サービスを有効化：
+2. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
+3. サービスを有効化：
 
 ```bash
 sudo cp mamepower.service /etc/systemd/system/
