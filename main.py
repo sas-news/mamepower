@@ -87,7 +87,8 @@ async def manage_server(interaction: discord.Interaction, server: str, action: s
 
     if action == "start":
         embed.add_field(name="アドレス", value=f"{GLOBAL_IP}:{profile['info']['port']}")
-        embed.add_field(name="パスワード", value=profile['info']['password'])
+        if 'password' in profile['info']:
+            embed.add_field(name="パスワード", value=profile['info']['password'])
 
         await client.change_presence(activity=discord.Game(profile["name"]))
     else:

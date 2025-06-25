@@ -73,6 +73,17 @@ BROADCAST_IP=your_broadcast_ip_here
 | TARGET_MAC    | Wake-on-LAN 対象デバイスの MAC アドレス    |
 | BROADCAST_IP  | Wake-on-LAN のブロードキャスト IP アドレス |
 
+もしくは、環境変数を直接設定することもできます。
+
+```bash
+export DISCORD_TOKEN=your_discord_token_here
+export SSH_HOST=your_server_ip_here
+export SSH_PORT=your_ssh_port_here
+export SSH_USER=your_ssh_username_here
+export TARGET_MAC=your_target_mac_here
+export BROADCAST_IP=your_broadcast_ip_here
+```
+
 ### 3. サーバー設定
 
 [servers.json](servers.json)でサーバー設定を編集：
