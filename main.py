@@ -7,6 +7,7 @@ import paramiko
 from wakeonlan import send_magic_packet
 import time
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -25,6 +26,8 @@ TARGET_MAC = os.getenv('TARGET_MAC')
 BROADCAST_IP = os.getenv('BROADCAST_IP')
 
 PING_TIMEOUT = 120
+
+executor = ThreadPoolExecutor()
 
 def ping_host(host):
     """指定されたホストにpingを送信し、応答があるか確認"""
@@ -49,12 +52,15 @@ def execute_remote_command(command):
         raise Exception(f"SSHエラー: {error}")
     return output
 
+async def execute_remote_command_async(command):
+    """SSH経由でリモートコマンドを非同期で実行"""
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(executor, execute_remote_command, command)
+
 @client.event
 async def on_ready():
     await client.change_presence()
     await tree.sync()
-
-
 
 profiles = json.load(open("./servers.json", "r"))
 server_choices = [cmd.Choice(name=profile['name'], value=profile['id']) for profile in profiles]
@@ -76,7 +82,7 @@ async def manage_server(interaction: discord.Interaction, server: str, action: s
         command = profile["command"][action]
 
     try:
-        execute_remote_command(command)
+        await execute_remote_command_async(command)
     except Exception as e:
         await interaction.followup.send(f"エラー: {str(e)}")
         return
@@ -125,7 +131,7 @@ async def on_gsm(interaction: discord.Interaction, server: str, action: str):
 
     try:
         command = f"/home/mame/games/{server}/gs {action}"
-        output = execute_remote_command(command)
+        output = await execute_remote_command_async(command)
         
         true_output = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]').sub('', output)
         status = "成功"
@@ -195,7 +201,7 @@ async def on_power_off(interaction: discord.Interaction):
             await interaction.followup.send(f":information_source: デバイスは既にオフラインです。")
             return
 
-        execute_remote_command("sudo poweroff")
+        await execute_remote_command_async("sudo poweroff")  # 非同期版を使用
         await interaction.followup.send(f":octagonal_sign: シャットダウンコマンドを送信しました。デバイスがオフラインになるまで待機します... (最大{PING_TIMEOUT}秒)")
 
         start_time = time.time()
@@ -225,7 +231,7 @@ async def on_reboot(interaction: discord.Interaction):
             await interaction.followup.send(f":information_source: デバイスはオフラインです。再起動できません。")
             return
 
-        execute_remote_command("sudo reboot")
+        await execute_remote_command_async("sudo reboot")  # 非同期版を使用
         await interaction.followup.send(f":arrows_counterclockwise: 再起動コマンドを送信しました。デバイスが再起動するまで待機します... (最大{PING_TIMEOUT}秒)")
 
         start_time = time.time()
@@ -267,10 +273,10 @@ async def on_stats(interaction: discord.Interaction):
         disk_cmd = "df -B1 / | awk 'NR==2 { printf \"%.1f %.1f\", $3/1024/1024/1024, $2/1024/1024/1024 }'"
         uptime_cmd = "uptime -p"
 
-        cpu_usage = execute_remote_command(cpu_cmd).strip()
-        mem_used, mem_total = map(float, execute_remote_command(memory_cmd).strip().split())
-        disk_used, disk_total = map(float, execute_remote_command(disk_cmd).strip().split())
-        uptime_raw = execute_remote_command(uptime_cmd).strip()
+        cpu_usage = await execute_remote_command_async(cpu_cmd)
+        mem_used, mem_total = map(float, (await execute_remote_command_async(memory_cmd)).strip().split())
+        disk_used, disk_total = map(float, (await execute_remote_command_async(disk_cmd)).strip().split())
+        uptime_raw = await execute_remote_command_async(uptime_cmd)
 
         uptime_jp = (
             uptime_raw.replace("up ", "")
