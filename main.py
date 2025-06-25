@@ -294,7 +294,7 @@ async def on_stats(interaction: discord.Interaction):
             value=f"{mem_used:.1f} GB / {mem_total:.1f} GB ({mem_used*100/mem_total:.1f}%)",
             inline=True,
         )
-        embed.add_field(name="\u200b", value="\u200b", inline=False)
+        embed.add_field(name="\u200b", value="\u200b", inline=True)
         embed.add_field(
             name="ディスク使用量",
             value=f"{disk_used:.1f} GB / {disk_total:.1f} GB ({disk_used*100/disk_total:.1f}%)",
