@@ -47,6 +47,7 @@ Discord 経由でサーバーの管理と電源制御を行う Python ベース�
 ### 1. 依存関係のインストール
 
 ```bash
+chmod +x setup.sh
 bash setup.sh
 ```
 
@@ -101,13 +102,20 @@ python main.py
 ### スクリプト実行
 
 ```bash
+chmod +x start.sh
 bash start.sh
 ```
 
 ### systemd サービスとして実行
 
-1. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
-2. サービスを有効化：
+1. [mamepower.service](mamepower.service)を自分の環境に合わせて編集
+
+   - `WorkingDirectory` をプロジェクトのパスに変更
+   - `ExecStart` を`start.sh`のパスに変更
+   - `User` を実行ユーザーに合わせて変更
+
+2. [mamepower.service](mamepower.service)を systemd ディレクトリにコピー
+3. サービスを有効化：
 
 ```bash
 sudo cp mamepower.service /etc/systemd/system/
