@@ -1,0 +1,40 @@
+[
+  {
+    "name": "Palworld",
+    "id": "pwserver",
+    "gsm": true,
+    "info": {
+      "port": 8800,
+      "password": "mameta"
+    }
+  },
+  {
+    "name": "FTB NeoTech",
+    "id": "neotech",
+    "gsm": true,
+    "info": {
+      "port": 26208
+    }
+  },
+  {
+    "name": "FTB OceanBlock",
+    "id": "oceanblock",
+    "gsm": true,
+    "info": {
+      "port": 26208
+    }
+  },
+  {
+    "name": "Terraria",
+    "id": "terraria",
+    "gsm": false,
+    "command": {
+      "start": "/home/mame/games/terraria/server.sh start",
+      "stop": "/home/mame/games/terraria/stop.sh stop"
+    },
+    "info": {
+      "port": 7777,
+      "password": "ek75"
+    }
+  }
+]

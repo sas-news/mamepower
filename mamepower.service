@@ -1,0 +1,14 @@
+[Unit]
+Description=MamePower Bot Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/sasnews/mamepower
+ExecStart=/bin/bash /home/sasnews/mamepower/start.sh
+Restart=always
+RestartSec=10
+User=sasnews
+
+[Install]
+WantedBy=multi-user.target
