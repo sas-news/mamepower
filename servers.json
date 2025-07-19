@@ -33,8 +33,8 @@
     }
   },
   {
-    "name": "Minecraft Vanilla 1.21.7",
-    "id": "mc-1.21.7",
+    "name": "Minecraft Vanilla Latest",
+    "id": "mc-latest",
     "gsm": true,
     "info": {
       "port": 26208
