@@ -25,6 +25,22 @@
     }
   },
   {
+    "name": "FTB Infinity Evolved",
+    "id": "infinity_evolved",
+    "gsm": true,
+    "info": {
+      "port": 26208
+    }
+  },
+  {
+    "name": "Minecraft Vanilla 1.21.7",
+    "id": "mc-1.21.7",
+    "gsm": true,
+    "info": {
+      "port": 26208
+    }
+  },
+  {
     "name": "Terraria",
     "id": "terraria",
     "gsm": false,
