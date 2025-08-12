@@ -169,6 +169,9 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
     await manage_server(interaction, server, "stop")
 
     if shutdown:
+        await asyncio.sleep(5)
+        await interaction.response.defer()
+        
         try:
             if not ping_host(SSH_HOST):
                 await interaction.followup.send(":information_source: デバイスは既にオフラインです。シャットダウンは不要です。")
