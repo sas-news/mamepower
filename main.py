@@ -1,4 +1,5 @@
 import os
+import platform
 import subprocess
 import re
 import json
@@ -12,40 +13,46 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Discord クライアント初期化
 client = discord.Client(intents=discord.Intents.default())
 cmd = discord.app_commands
 tree = cmd.CommandTree(client)
 
 GLOBAL_IP = subprocess.run(["curl", "-s", "https://api.ipify.org"], capture_output=True, text=True).stdout.strip()
 
-DISCORD_TOKEN = os.getenv('DISCORD_TOKEN')
-SSH_HOST = os.getenv('SSH_HOST')
-SSH_PORT = int(os.getenv('SSH_PORT', 22))
-SSH_USER = os.getenv('SSH_USER')
-TARGET_MAC = os.getenv('TARGET_MAC')
-BROADCAST_IP = os.getenv('BROADCAST_IP')
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+SSH_HOST = os.getenv("SSH_HOST")
+SSH_PORT = int(os.getenv("SSH_PORT", 22))
+SSH_USER = os.getenv("SSH_USER")
+TARGET_MAC = os.getenv("TARGET_MAC")
+BROADCAST_IP = os.getenv("BROADCAST_IP")
 
 PING_TIMEOUT = 120
 
 executor = ThreadPoolExecutor()
 
 def ping_host(host):
-    """指定されたホストにpingを送信し、応答があるか確認"""
+    """指定されたホストに ping を送信し、応答があるか確認 (OS別オプション切替)"""
     try:
-        command = ["ping", "-c", "1", "-W", "1", host]
+        if platform.system() == "Windows":
+            # Windows: -n 1 (1回), -w 1000 (ms)
+            command = ["ping", "-n", "1", "-w", "1000", host]
+        else:
+            # Unix系: -c 1 (1回), -W 1 (秒)
+            command = ["ping", "-c", "1", "-W", "1", host]
         return subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
     except (subprocess.CalledProcessError, FileNotFoundError):
         return False
 
 def execute_remote_command(command):
-    """SSH経由でリモートコマンドを実行"""
+    """SSH 経由でリモートコマンドを実行"""
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(SSH_HOST, port=SSH_PORT, username=SSH_USER)
 
     stdin, stdout, stderr = ssh.exec_command(command)
-    output = stdout.read().decode('utf-8')
-    error = stderr.read().decode('utf-8')
+    output = stdout.read().decode("utf-8")
+    error = stderr.read().decode("utf-8")
     ssh.close()
 
     if error:
@@ -53,17 +60,41 @@ def execute_remote_command(command):
     return output
 
 async def execute_remote_command_async(command):
-    """SSH経由でリモートコマンドを非同期で実行"""
+    """SSH 経由でリモートコマンドを非同期で実行"""
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(executor, execute_remote_command, command)
 
+# ===== 電源制御ユーティリティ =====
+def send_wol():
+    """ターゲットに WoL マジックパケットを送信"""
+    send_magic_packet(TARGET_MAC, ip_address=BROADCAST_IP)
+
+async def wait_for_online(timeout: int = PING_TIMEOUT, interval: int = 5) -> bool:
+    """ホストがオンラインになるまで待機 (True: 成功 / False: タイムアウト)"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if ping_host(SSH_HOST):
+            return True
+        await asyncio.sleep(interval)
+    return False
+
+async def wait_for_offline(timeout: int = PING_TIMEOUT, interval: int = 5) -> bool:
+    """ホストがオフラインになるまで待機 (True: 成功 / False: タイムアウト)"""
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        if not ping_host(SSH_HOST):
+            return True
+        await asyncio.sleep(interval)
+    return False
+
+# ===== Discord ハンドラ =====
 @client.event
 async def on_ready():
     await client.change_presence()
     await tree.sync()
 
 profiles = json.load(open("./servers.json", "r"))
-server_choices = [cmd.Choice(name=profile['name'], value=profile['id']) for profile in profiles]
+server_choices = [cmd.Choice(name=profile["name"], value=profile["id"]) for profile in profiles]
 contents = {
     "start": {"emoji":"white_check_mark","msg":"起動", "color": 0x00ff00},
     "stop": {"emoji":"octagonal_sign","msg":"停止", "color": 0xff0000},
@@ -71,10 +102,33 @@ contents = {
 }
 
 async def manage_server(interaction: discord.Interaction, server: str, action: str):
+    """ゲームサーバーの start/stop などを共通処理"""
     await interaction.response.defer()
-    index = next(i for i, profile in enumerate(profiles) if profile['id'] == server)
+    index = next(i for i, profile in enumerate(profiles) if profile["id"] == server)
     profile = profiles[index]
     
+    # start時にホストがオフラインなら自動で起動（WoL）してオンラインになるまで待機
+    if action == "start":
+        try:
+            if not ping_host(SSH_HOST):
+                send_wol()
+                await interaction.followup.send(f":electric_plug: デバイスがオフラインのため起動信号を送信しました。オンラインになるまで待機します... (最大{PING_TIMEOUT}秒)")
+
+                if not (await wait_for_online()):
+                    embed = discord.Embed(
+                        title=":warning: 起動タイムアウト",
+                        description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオンラインになりませんでした。",
+                        color=0xffcc00,
+                    )
+                    await interaction.followup.send(embed=embed)
+                    return
+                else:
+                    await interaction.followup.send(":white_check_mark: デバイスがオンラインになりました。サーバー起動を続行します。")
+        except Exception as e:
+            embed = discord.Embed(title=":x: エラー発生", description=str(e), color=0xff0000)
+            await interaction.followup.send(embed=embed)
+            return
+
     gsm = profile["gsm"]
     if gsm:
         command = f"/home/mame/games/{server}/gs {action}"
@@ -93,8 +147,8 @@ async def manage_server(interaction: discord.Interaction, server: str, action: s
 
     if action == "start":
         embed.add_field(name="アドレス", value=f"{GLOBAL_IP}:{profile['info']['port']}")
-        if 'password' in profile['info']:
-            embed.add_field(name="パスワード", value=profile['info']['password'])
+        if "password" in profile["info"]:
+            embed.add_field(name="パスワード", value=profile["info"]["password"])
 
         await client.change_presence(activity=discord.Game(profile["name"]))
     else:
@@ -110,10 +164,39 @@ async def on_start(interaction: discord.Interaction, server: str):
 @tree.command(name="stop", description="サーバー停止")
 @cmd.describe(server="停止するサーバーを選んでください")
 @cmd.choices(server=server_choices)
-async def on_stop(interaction: discord.Interaction, server: str):
+@cmd.describe(shutdown="停止後にPCをシャットダウンしますか？ (既定: しない)")
+async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool = False):
     await manage_server(interaction, server, "stop")
 
-gsm_servers = [cmd.Choice(name=profile['name'], value=profile['id']) for profile in profiles if profile["gsm"]]
+    if shutdown:
+        try:
+            if not ping_host(SSH_HOST):
+                await interaction.followup.send(":information_source: デバイスは既にオフラインです。シャットダウンは不要です。")
+                return
+
+            await execute_remote_command_async("sudo poweroff")
+            await interaction.followup.send(f":octagonal_sign: シャットダウンコマンドを送信しました。デバイスがオフラインになるまで待機します... (最大{PING_TIMEOUT}秒)")
+
+            start_time = time.time()
+            while time.time() - start_time < PING_TIMEOUT:
+                if not ping_host(SSH_HOST):
+                    embed = discord.Embed(title=":white_check_mark: シャットダウン成功", description="デバイスがオフラインになりました。", color=0xff0000)
+                    await interaction.followup.send(embed=embed)
+                    return
+                await asyncio.sleep(5)
+
+            embed = discord.Embed(
+                title=":warning: シャットダウンタイムアウト",
+                description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオフラインになりませんでした。",
+                color=0xffcc00,
+            )
+            await interaction.followup.send(embed=embed)
+
+        except Exception as e:
+            embed = discord.Embed(title=":x: エラー発生", description=str(e), color=0xff0000)
+            await interaction.followup.send(embed=embed)
+
+gsm_servers = [cmd.Choice(name=profile["name"], value=profile["id"]) for profile in profiles if profile["gsm"]]
 actions = [
         ["Start", "start"], ["Stop", "stop"], ["Restart", "restart"],
         ["Details", "details"], ["Post Details", "postdetails"],["Skeleton", "skeleton"],
@@ -132,17 +215,16 @@ async def on_gsm(interaction: discord.Interaction, server: str, action: str):
     try:
         command = f"/home/mame/games/{server}/gs {action}"
         output = await execute_remote_command_async(command)
-        
-        true_output = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]').sub('', output)
+        true_output = re.compile(r"\x1B\[[0-?]*[ -/]*[@-~]").sub("", output)
         status = "成功"
-        
     except Exception as e:
         true_output = str(e)
         status = "失敗"
 
     content = contents["gsm"]
+    emoji_or_warning = content["emoji"] if status == "成功" else "warning"
     embed = discord.Embed(
-        title=f":{content['emoji'] if status == '成功' else 'warning'}: コマンド実行 {status}",
+        title=f":{emoji_or_warning}: コマンド実行 {status}",
         description=f"{server}でコマンド'{action}'を実行しました",
         color=content["color"]
     )
@@ -170,19 +252,14 @@ async def on_power_on(interaction: discord.Interaction):
             await interaction.followup.send(f":information_source: デバイスは既にオンラインです。")
             return
 
-        send_magic_packet(TARGET_MAC, ip_address=BROADCAST_IP)
+        send_wol()
         await interaction.followup.send(f":electric_plug: 起動信号を送信しました。デバイスがオンラインになるまで待機します... (最大{PING_TIMEOUT}秒)")
-
-        start_time = time.time()
-        while time.time() - start_time < PING_TIMEOUT:
-            if ping_host(SSH_HOST):
-                embed = discord.Embed(title=":white_check_mark: 起動成功", description="**ミニPC**がオンラインになりました。", color=0x00ff00)
-                await interaction.edit_original_response(content=None, embed=embed)
-                return
-            await asyncio.sleep(5)
-
-        embed = discord.Embed(title=":warning: 起動タイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオンラインになりませんでした。", color=0xffcc00)
-        await interaction.edit_original_response(content=None, embed=embed)
+        if await wait_for_online():
+            embed = discord.Embed(title=":white_check_mark: 起動成功", description="**ミニPC**がオンラインになりました。", color=0x00ff00)
+            await interaction.edit_original_response(content=None, embed=embed)
+        else:
+            embed = discord.Embed(title=":warning: 起動タイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオンラインになりませんでした。", color=0xffcc00)
+            await interaction.edit_original_response(content=None, embed=embed)
 
     except Exception as e:
         embed = discord.Embed(title=":x: エラー発生", description=str(e), color=0xff0000)
@@ -203,17 +280,12 @@ async def on_power_off(interaction: discord.Interaction):
 
         await execute_remote_command_async("sudo poweroff")  # 非同期版を使用
         await interaction.followup.send(f":octagonal_sign: シャットダウンコマンドを送信しました。デバイスがオフラインになるまで待機します... (最大{PING_TIMEOUT}秒)")
-
-        start_time = time.time()
-        while time.time() - start_time < PING_TIMEOUT:
-            if not ping_host(SSH_HOST):
-                embed = discord.Embed(title=":white_check_mark: シャットダウン成功", description="**ミニPC**がオフラインになりました。", color=0xff0000)
-                await interaction.edit_original_response(content=None, embed=embed)
-                return
-            await asyncio.sleep(5)
-
-        embed = discord.Embed(title=":warning: シャットダウンタイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオフラインになりませんでした。", color=0xffcc00)
-        await interaction.edit_original_response(content=None, embed=embed)
+        if await wait_for_offline():
+            embed = discord.Embed(title=":white_check_mark: シャットダウン成功", description="**ミニPC**がオフラインになりました。", color=0xff0000)
+            await interaction.edit_original_response(content=None, embed=embed)
+        else:
+            embed = discord.Embed(title=":warning: シャットダウンタイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオフラインになりませんでした。", color=0xffcc00)
+            await interaction.edit_original_response(content=None, embed=embed)
 
     except Exception as e:
         embed = discord.Embed(title=":x: エラー発生", description=str(e), color=0xff0000)
@@ -233,17 +305,12 @@ async def on_reboot(interaction: discord.Interaction):
 
         await execute_remote_command_async("sudo reboot")  # 非同期版を使用
         await interaction.followup.send(f":arrows_counterclockwise: 再起動コマンドを送信しました。デバイスが再起動するまで待機します... (最大{PING_TIMEOUT}秒)")
-
-        start_time = time.time()
-        while time.time() - start_time < PING_TIMEOUT:
-            if ping_host(SSH_HOST):
-                embed = discord.Embed(title=":white_check_mark: 再起動成功", description=f"`{SSH_HOST}` がオンラインになりました。", color=0x00ff00)
-                await interaction.edit_original_response(content=None, embed=embed)
-                return
-            await asyncio.sleep(5)
-
-        embed = discord.Embed(title=":warning: 再起動タイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオンラインになりませんでした。", color=0xffcc00)
-        await interaction.edit_original_response(content=None, embed=embed)
+        if await wait_for_online():
+            embed = discord.Embed(title=":white_check_mark: 再起動成功", description=f"`{SSH_HOST}` がオンラインになりました。", color=0x00ff00)
+            await interaction.edit_original_response(content=None, embed=embed)
+        else:
+            embed = discord.Embed(title=":warning: 再起動タイムアウト", description=f"{PING_TIMEOUT}秒以内に `{SSH_HOST}` がオンラインになりませんでした。", color=0xffcc00)
+            await interaction.edit_original_response(content=None, embed=embed)
 
     except Exception as e:
         embed = discord.Embed(title=":x: エラー発生", description=str(e), color=0xff0000)
