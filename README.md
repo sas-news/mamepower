@@ -47,7 +47,6 @@ Discord 経由でサーバーの管理と電源制御を行う Python ベース�
 ### 1. 依存関係のインストール
 
 ```bash
-chmod +x setup.sh
 bash setup.sh
 ```
 
@@ -108,7 +107,6 @@ python main.py
 ### スクリプト実行
 
 ```bash
-chmod +x start.sh
 bash start.sh
 ```
 
@@ -157,6 +155,6 @@ sudo systemctl start mamepower.service
 
 ## 注意事項
 
-- `.env`ファイルには機密情報が含まれるため、Git リポジトリにコミットしないでください
-- SSH 接続には公開鍵認証の使用を推奨します
+- SSH 接続には公開鍵認証の使用が必須です
 - Wake-on-LAN 機能はネットワーク設定とハードウェア対応が必要です
+- `.env`ファイルの誤コミットに気を付けて！
