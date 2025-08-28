@@ -1,4 +1,4 @@
 discord.py
-paramiko
 wakeonlan
 dotenv
+asyncssh
