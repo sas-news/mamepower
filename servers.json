@@ -13,7 +13,7 @@
     "id": "neotech",
     "gsm": true,
     "info": {
-      "port": 26208
+      "hostname": "mc.sasnews.dev"
     }
   },
   {
@@ -21,7 +21,7 @@
     "id": "oceanblock",
     "gsm": true,
     "info": {
-      "port": 26208
+      "hostname": "mc.sasnews.dev"
     }
   },
   {
@@ -37,7 +37,7 @@
     "id": "mc-latest",
     "gsm": true,
     "info": {
-      "port": 26208
+      "hostname": "mc.sasnews.dev"
     }
   },
   {

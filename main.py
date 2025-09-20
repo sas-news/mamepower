@@ -33,10 +33,14 @@ class Config:
     global_ip: str = field(init=False)
 
     def __post_init__(self):
-        try:
-            self.global_ip = subprocess.run(["curl", "-s", "https://api.ipify.org"], capture_output=True, text=True, check=True).stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            self.global_ip = "取得失敗"
+        public_hostname = os.getenv("PUBLIC_HOSTNAME")
+        if public_hostname:
+            self.global_ip = public_hostname
+        else:
+            try:
+                self.global_ip = subprocess.run(["curl", "-s", "https://api.ipify.org"], capture_output=True, text=True, check=True).stdout.strip()
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                self.global_ip = "取得失敗"
 
 @dataclass
 class Constants:
@@ -258,7 +262,10 @@ async def manage_server(interaction: discord.Interaction, server_id: str, action
         )
 
         if action == "start":
-            embed.add_field(name="アドレス", value=f"{config.global_ip}:{profile['info']['port']}", inline=False)
+            base_address = profile["info"].get("hostname") or config.global_ip
+            port = profile["info"].get("port")
+            address = f"{base_address}:{port}" if port else base_address
+            embed.add_field(name="アドレス", value=address, inline=False)
             if "password" in profile["info"]:
                 embed.add_field(name="パスワード", value=profile["info"]["password"], inline=False)
             await client.change_presence(activity=discord.Game(name=profile["name"]))

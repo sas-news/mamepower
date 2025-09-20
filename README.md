@@ -67,16 +67,18 @@ SSH_PORT=your_ssh_port_here
 SSH_USER=your_ssh_username_here
 TARGET_MAC=your_target_mac_here
 BROADCAST_IP=your_broadcast_ip_here
+PUBLIC_HOSTNAME=your_public_hostname_here (optional)
 ```
 
-| 変数名        | 説明                                       |
-| ------------- | ------------------------------------------ |
-| DISCORD_TOKEN | Discord Bot のトークン                     |
-| SSH_HOST      | SSH 接続先のサーバー IP アドレス           |
-| SSH_PORT      | SSH 接続ポート（通常は 22）                |
-| SSH_USER      | SSH 接続ユーザー名                         |
-| TARGET_MAC    | Wake-on-LAN 対象デバイスの MAC アドレス    |
-| BROADCAST_IP  | Wake-on-LAN のブロードキャスト IP アドレス |
+| 変数名          | 説明                                       |
+| --------------- | ------------------------------------------ |
+| DISCORD_TOKEN   | Discord Bot のトークン                     |
+| SSH_HOST        | SSH 接続先のサーバー IP アドレス           |
+| SSH_PORT        | SSH 接続ポート（通常は 22）                |
+| SSH_USER        | SSH 接続ユーザー名                         |
+| TARGET_MAC      | Wake-on-LAN 対象デバイスの MAC アドレス    |
+| BROADCAST_IP    | Wake-on-LAN のブロードキャスト IP アドレス |
+| PUBLIC_HOSTNAME | 公開ホスト名（任意）                       |
 
 ### 3. サーバー設定
 
