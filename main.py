@@ -5,6 +5,7 @@ import re
 import json
 import discord
 from discord import app_commands as cmd
+from discord.ext import tasks
 import asyncssh
 from wakeonlan import send_magic_packet
 import time
@@ -74,10 +75,32 @@ class Constants:
 config = Config()
 constants = Constants()
 
+# グローバル変数
+current_game_name: Optional[str] = None
+
 # Discord クライアント初期化
 intents = discord.Intents.default()
 client = discord.Client(intents=intents)
 tree = cmd.CommandTree(client)
+
+# ==============================================================================
+# 定期実行タスク
+# ==============================================================================
+@tasks.loop(minutes=1)
+async def update_presence_task():
+    """定期的にデバイスの状態を確認し、プレゼンスを更新するタスク"""
+    global current_game_name
+    try:
+        if await device_manager.is_online():
+            activity = discord.Game(name=current_game_name) if current_game_name else None
+            await client.change_presence(status=discord.Status.online, activity=activity)
+        else:
+            # オフラインになったらゲームも終了しているはず
+            if current_game_name:
+                current_game_name = None
+            await client.change_presence(status=discord.Status.idle, activity=None)
+    except Exception as e:
+        print(f"プレゼンスの更新中にエラーが発生しました: {e}")
 
 # ==============================================================================
 # ユーティリティ & ヘルパークラス
@@ -199,8 +222,9 @@ device_manager = DeviceManager(config.ssh_host, config.target_mac, config.broadc
 @client.event
 async def on_ready():
     """ボット起動時の処理"""
-    await client.change_presence()
+    await client.change_presence(status=discord.Status.idle)
     await tree.sync()
+    update_presence_task.start()
     print(f"{client.user} としてログインしました。")
 
 async def handle_interaction_error(interaction: discord.Interaction, e: Exception):
@@ -222,6 +246,7 @@ async def handle_interaction_error(interaction: discord.Interaction, e: Exceptio
 
 async def manage_server(interaction: discord.Interaction, server_id: str, action: str):
     """ゲームサーバーの start/stop などを共通処理"""
+    global current_game_name
     await interaction.response.defer()
     
     profile = next((p for p in constants.profiles if p["id"] == server_id), None)
@@ -238,6 +263,7 @@ async def manage_server(interaction: discord.Interaction, server_id: str, action
                     await pc_message.edit(embed=EmbedHelper.warning("起動タイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。"))
                     return
                 await pc_message.edit(embed=EmbedHelper.success("PC起動完了", "*`MAME G.S.`*がオンラインになりました。"))
+                await client.change_presence(status=discord.Status.online)
 
         content_initial = constants.content_map[action]
         server_message = await interaction.followup.send(embed=EmbedHelper.info(f"{profile['name']}を{content_initial['msg']}中...", f"{profile['name']}の{content_initial['msg']}処理を開始します。"))
@@ -268,9 +294,11 @@ async def manage_server(interaction: discord.Interaction, server_id: str, action
             embed.add_field(name="アドレス", value=address, inline=False)
             if "password" in profile["info"]:
                 embed.add_field(name="パスワード", value=profile["info"]["password"], inline=False)
-            await client.change_presence(activity=discord.Game(name=profile["name"]))
+            current_game_name = profile["name"]
+            await client.change_presence(activity=discord.Game(name=current_game_name))
         else:
-            await client.change_presence()
+            current_game_name = None
+            await client.change_presence(activity=None)
         
         await server_message.edit(embed=embed)
 
@@ -307,7 +335,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
             description=f"{profile['name']}が{content['msg']}しました",
             color=content['color']
         )
-        await client.change_presence()
+        await client.change_presence(activity=None)
         await server_message.edit(embed=embed)
 
         if shutdown:
@@ -321,6 +349,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
 
             if await device_manager.wait_for_offline():
                 embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
+                await client.change_presence(status=discord.Status.idle)
             else:
                 embed = EmbedHelper.warning("シャットダウンタイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオフラインになりませんでした。")
             
@@ -370,6 +399,7 @@ async def on_power_on(interaction: discord.Interaction):
         
         if await device_manager.wait_for_online():
             await message.edit(embed=EmbedHelper.success("起動成功", "*`MAME G.S.`*がオンラインになりました。"))
+            await client.change_presence(status=discord.Status.online)
         else:
             await message.edit(embed=EmbedHelper.warning("起動タイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。"))
 
@@ -390,8 +420,9 @@ async def on_power_off(interaction: discord.Interaction):
 
         if await device_manager.wait_for_offline():
             embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
+            await client.change_presence(status=discord.Status.idle)
         else:
-            embed = EmbedHelper.warning("シャットダウンタイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオフラインになりませんでした。")
+            embed = EmbedHelper.warning("シャットダウンタイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。")
         
         await message.edit(embed=embed)
 
@@ -417,6 +448,7 @@ async def on_reboot(interaction: discord.Interaction):
         await message.edit(embed=EmbedHelper.info("再起動中...", "デバイスの再起動を待っています..."))
         if await device_manager.wait_for_online():
             embed = EmbedHelper.success("再起動成功", "*`MAME G.S.`*がオンラインになりました。")
+            await client.change_presence(status=discord.Status.online)
         else:
             embed = EmbedHelper.warning("再起動タイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。")
 
