@@ -22,11 +22,6 @@ load_dotenv()
 class Config:
     """環境変数から読み込む設定値"""
     discord_token: str = os.getenv("DISCORD_TOKEN")
-    ssh_host: str = os.getenv("SSH_HOST")
-    ssh_port: int = int(os.getenv("SSH_PORT", 22))
-    ssh_user: str = os.getenv("SSH_USER")
-    target_mac: str = os.getenv("TARGET_MAC")
-    broadcast_ip: str = os.getenv("BROADCAST_IP")
     ping_timeout: int = 120
     ssh_ready_timeout: int = int(os.getenv("SSH_READY_TIMEOUT", 90))
     global_ip: str = field(init=False)
@@ -167,10 +162,7 @@ executor = LocalExecutor()
 
 class DeviceManager:
     """常時起動PCでのローカル状態管理（WoL・リモートping不要）"""
-    def __init__(self, host: str, mac: str, broadcast_ip: str, ping_timeout: int):
-        self.host = host
-        self.mac = mac
-        self.broadcast_ip = broadcast_ip
+    def __init__(self, ping_timeout: int):
         self.ping_timeout = ping_timeout
 
     async def is_online(self) -> bool:
@@ -203,7 +195,7 @@ class DeviceManager:
             return os.path.exists(path_to_check)
         return True
 
-device_manager = DeviceManager(config.ssh_host, config.target_mac, config.broadcast_ip, config.ping_timeout)
+device_manager = DeviceManager(config.ping_timeout)
 
 # ==============================================================================
 # Discord イベントハンドラ & コマンド
