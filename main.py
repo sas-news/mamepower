@@ -6,8 +6,6 @@ import json
 import discord
 from discord import app_commands as cmd
 from discord.ext import tasks
-import asyncssh
-from wakeonlan import send_magic_packet
 import time
 import asyncio
 from dataclasses import dataclass, field
@@ -133,37 +131,42 @@ class EmbedHelper:
         return EmbedHelper.create_embed(f":information_source: {title}", description, 0x0000ff)
 
 
-class RemoteClient:
-    """SSH経由でのリモート操作を管理するクラス"""
-    def __init__(self, host: str, port: int, user: str):
-        self.host = host
-        self.port = port
-        self.user = user
-        self.conn_options = {"known_hosts": None}
+class LocalExecutor:
+    """ローカルでのコマンド実行を管理するクラス（常時起動PCでSSH不要）"""
+
+    @staticmethod
+    def _env() -> dict:
+        """LinuxGSMのtmuxceptionを防ぐため TMUX を除去した環境変数を返す"""
+        env = os.environ.copy()
+        env.pop("TMUX", None)
+        return env
 
     async def execute(self, command: str) -> str:
-        """リモートコマンドを実行し、標準出力を返す"""
+        """ローカルコマンドを実行し、標準出力を返す"""
         try:
-            async with asyncssh.connect(self.host, port=self.port, username=self.user, **self.conn_options) as conn:
-                result = await conn.run(command, check=True)
-                return result.stdout.strip() if result.stdout else ""
-        except (asyncssh.Error, OSError) as e:
-            raise ConnectionError(f"SSHコマンド実行に失敗しました: {e}")
+            proc = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=self._env(),
+            )
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
+            if proc.returncode != 0:
+                err = stderr.decode().strip() or f"(exit code {proc.returncode})"
+                raise ConnectionError(f"コマンド実行に失敗しました: {err}")
+            return stdout.decode().strip()
+        except asyncio.TimeoutError:
+            raise ConnectionError("コマンドがタイムアウトしました")
 
     async def check_path(self, path: str) -> bool:
-        """リモートのパスが存在するか確認"""
-        try:
-            async with asyncssh.connect(self.host, port=self.port, username=self.user, **self.conn_options) as conn:
-                await conn.run(f"test -e {path}", check=True)
-                return True
-        except (asyncssh.Error, OSError):
-            return False
+        """パスが存在するか確認"""
+        return os.path.exists(path)
 
-remote_client = RemoteClient(config.ssh_host, config.ssh_port, config.ssh_user)
+executor = LocalExecutor()
 
 
 class DeviceManager:
-    """デバイスの電源状態やオンライン状態を管理するクラス"""
+    """常時起動PCでのローカル状態管理（WoL・リモートping不要）"""
     def __init__(self, host: str, mac: str, broadcast_ip: str, ping_timeout: int):
         self.host = host
         self.mac = mac
@@ -171,47 +174,34 @@ class DeviceManager:
         self.ping_timeout = ping_timeout
 
     async def is_online(self) -> bool:
-        """ホストがオンラインか非同期で確認"""
-        param = "-n" if platform.system() == "Windows" else "-c"
-        command = ["ping", param, "1", "-w", "1000", self.host] if platform.system() == "Windows" else ["ping", param, "1", "-W", "1", self.host]
-        try:
-            proc = await asyncio.create_subprocess_exec(*command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            await asyncio.wait_for(proc.wait(), timeout=2.0)
-            return proc.returncode == 0
-        except (FileNotFoundError, asyncio.TimeoutError):
-            return False
+        """常時起動のため常にオンラインを返す"""
+        return True
 
-    def send_wol(self):
-        """WoLマジックパケットを送信"""
-        send_magic_packet(self.mac, ip_address=self.broadcast_ip)
+    async def wait_for_online(self, interval: int = 5) -> bool:
+        """常時起動のため即座にTrueを返す"""
+        return True
 
-    async def wait_for_status(self, target_status: bool, timeout: int, interval: int = 5) -> bool:
-        """ホストが目標の状態（オンライン/オフライン）になるまで待機"""
+    async def wait_for_offline(self, interval: int = 5) -> bool:
+        """ローカルホストへのpingでオフラインになるまで待機（シャットダウン/再起動用）"""
         start_time = time.time()
-        while time.time() - start_time < timeout:
-            if await self.is_online() == target_status:
+        while time.time() - start_time < self.ping_timeout:
+            param = "-n" if platform.system() == "Windows" else "-c"
+            command = ["ping", param, "1", "-W", "1", "127.0.0.1"]
+            try:
+                proc = await asyncio.create_subprocess_exec(*command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                await asyncio.wait_for(proc.wait(), timeout=2.0)
+                if proc.returncode != 0:
+                    return True  # ping失敗 = オフライン
+            except (FileNotFoundError, asyncio.TimeoutError):
                 return True
             await asyncio.sleep(interval)
         return False
 
-    async def wait_for_online(self, interval: int = 5) -> bool:
-        return await self.wait_for_status(True, self.ping_timeout, interval)
-
-    async def wait_for_offline(self, interval: int = 5) -> bool:
-        return await self.wait_for_status(False, self.ping_timeout, interval)
-
     async def wait_for_ssh_ready(self, timeout: int, path_to_check: Optional[str] = None) -> bool:
-        """SSH接続および任意パスが利用可能になるまで待機"""
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            check_task = remote_client.check_path(path_to_check) if path_to_check else remote_client.execute("echo ok")
-            try:
-                if await asyncio.wait_for(check_task, timeout=10):
-                    return True
-            except (ConnectionError, asyncio.TimeoutError):
-                pass
-            await asyncio.sleep(5)
-        return False
+        """指定パスが存在すれば即座にTrueを返す（SSH不要）"""
+        if path_to_check:
+            return os.path.exists(path_to_check)
+        return True
 
 device_manager = DeviceManager(config.ssh_host, config.target_mac, config.broadcast_ip, config.ping_timeout)
 
@@ -255,30 +245,20 @@ async def manage_server(interaction: discord.Interaction, server_id: str, action
         return
 
     try:
-        if action == "start":
-            if not await device_manager.is_online():
-                pc_message = await interaction.followup.send(embed=EmbedHelper.info("PC起動中", f"デバイスがオフラインのため起動信号を送信しました。オンラインになるまで待機します... (最大{config.ping_timeout}秒)"))
-                device_manager.send_wol()
-                if not await device_manager.wait_for_online():
-                    await pc_message.edit(embed=EmbedHelper.warning("起動タイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。"))
-                    return
-                await pc_message.edit(embed=EmbedHelper.success("PC起動完了", "*`MAME G.S.`*がオンラインになりました。"))
-                await client.change_presence(status=discord.Status.online)
-
         content_initial = constants.content_map[action]
         server_message = await interaction.followup.send(embed=EmbedHelper.info(f"{profile['name']}を{content_initial['msg']}中...", f"{profile['name']}の{content_initial['msg']}処理を開始します。"))
 
         if action == "start":
-            game_script_path = f"/home/mame/games/{server_id}/gs"
-            await server_message.edit(embed=EmbedHelper.info("初期化待機中", f"起動後の初期化を確認しています... (最大{config.ssh_ready_timeout}秒)"))
-            if not await device_manager.wait_for_ssh_ready(config.ssh_ready_timeout, game_script_path):
-                desc = (f"{config.ssh_ready_timeout}秒以内に SSH またはゲームスクリプト `{game_script_path}` が利用可能になりませんでした。\n"
-                        "しばらく待ってから再度 /start を試してください。")
-                await server_message.edit(embed=EmbedHelper.warning("初期化タイムアウト", desc))
-                return
+            game_script_path = f"/home/mame/games/{server_id}/gs" if profile.get("gsm") else None
+            if profile.get("gsm"):
+                await server_message.edit(embed=EmbedHelper.info("確認中...", "ゲームスクリプトの存在を確認しています..."))
+                if not await device_manager.wait_for_ssh_ready(config.ssh_ready_timeout, game_script_path):
+                    desc = f"ゲームスクリプト `{game_script_path}` が見つかりませんでした。\nサーバーがセットアップされているか確認してください。"
+                    await server_message.edit(embed=EmbedHelper.warning("スクリプトが見つかりません", desc))
+                    return
 
         command = f"/home/mame/games/{server_id}/gs {action}" if profile.get("gsm") else profile["command"][action]
-        await remote_client.execute(command)
+        await executor.execute(command)
 
         content = constants.content_map[action]
         embed = EmbedHelper.create_embed(
@@ -327,7 +307,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
 
     try:
         command = f"/home/mame/games/{server}/gs stop" if profile.get("gsm") else profile["command"]["stop"]
-        await remote_client.execute(command)
+        await executor.execute(command)
 
         content = constants.content_map["stop"]
         embed = EmbedHelper.create_embed(
@@ -345,7 +325,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
 
             pc_message = await interaction.followup.send(embed=EmbedHelper.info("シャットダウン中...", "サーバー停止完了。シャットダウンを開始します..."))
             
-            await remote_client.execute("sudo poweroff")
+            await executor.execute("sudo poweroff")
 
             if await device_manager.wait_for_offline():
                 embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
@@ -365,7 +345,7 @@ async def on_gsm(interaction: discord.Interaction, server: str, action: str):
     await interaction.response.defer()
     try:
         command = f"/home/mame/games/{server}/gs {action}"
-        output = await remote_client.execute(command)
+        output = await executor.execute(command)
         true_output = re.sub(r'\x1B\[[0-?]*[ -/]*[@-~]', '', output)
         
         embed = EmbedHelper.create_embed(
@@ -386,25 +366,10 @@ async def on_gsm(interaction: discord.Interaction, server: str, action: str):
     except Exception as e:
         await handle_interaction_error(interaction, e)
 
-@tree.command(name="on", description="デバイスを起動します")
+@tree.command(name="on", description="デバイスを起動します（常時起動モードでは不要）")
 async def on_power_on(interaction: discord.Interaction):
     await interaction.response.defer()
-    try:
-        if await device_manager.is_online():
-            await interaction.followup.send(embed=EmbedHelper.info("デバイスはオンラインです", "*`MAME G.S.`*は既にオンラインです。"))
-            return
-
-        message = await interaction.followup.send(embed=EmbedHelper.info("デバイス起動中...", "起動信号を送信しました。オンラインになるまで待機します..."))
-        device_manager.send_wol()
-        
-        if await device_manager.wait_for_online():
-            await message.edit(embed=EmbedHelper.success("起動成功", "*`MAME G.S.`*がオンラインになりました。"))
-            await client.change_presence(status=discord.Status.online)
-        else:
-            await message.edit(embed=EmbedHelper.warning("起動タイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。"))
-
-    except Exception as e:
-        await handle_interaction_error(interaction, e)
+    await interaction.followup.send(embed=EmbedHelper.info("常時起動モード", "*`MAME G.S.`*は常時起動のため、すでにオンラインです。"))
 
 @tree.command(name="off", description="デバイスをシャットダウンします")
 async def on_power_off(interaction: discord.Interaction):
@@ -416,7 +381,7 @@ async def on_power_off(interaction: discord.Interaction):
 
         message = await interaction.followup.send(embed=EmbedHelper.info("シャットダウン中...", "シャットダウンを開始します。完了までお待ちください..."))
         
-        await remote_client.execute("sudo poweroff")
+        await executor.execute("sudo poweroff")
 
         if await device_manager.wait_for_offline():
             embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
@@ -438,7 +403,7 @@ async def on_reboot(interaction: discord.Interaction):
             return
 
         message = await interaction.followup.send(embed=EmbedHelper.info("再起動中...", "再起動コマンドを送信しました。デバイスがオンラインになるまで待機します..."))
-        await remote_client.execute("sudo reboot")
+        await executor.execute("sudo reboot")
 
         # オフライン->オンラインになるのを待つ
         await asyncio.sleep(10) # シャットダウンシーケンスのための待機
@@ -481,7 +446,7 @@ async def on_stats(interaction: discord.Interaction):
             "uptime": "uptime -p"
         }
         
-        results = await asyncio.gather(*[remote_client.execute(cmd) for cmd in cmds.values()])
+        results = await asyncio.gather(*[executor.execute(cmd) for cmd in cmds.values()])
         cpu_usage, mem_raw, disk_raw, uptime_raw = results
 
         mem_used, mem_total = map(float, mem_raw.split())

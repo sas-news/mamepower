@@ -1,31 +1,31 @@
 # MamePower Bot
 
-Discord 経由でサーバーの管理と電源制御を行う Python ベースのボットシステムです。
+Discord 経由でゲームサーバーを管理する Python ベースのボットシステムです。
+常時起動PC上で動作し、ローカルで直接サーバーを制御します。
 
 ## 概要
 
 まめぱわ～は、以下の機能を提供します：
 
 - Discord SlashCommands によるサーバー管理
-- Wake-on-LAN（WoL）によるデバイス起動
-- SSH 経由でのリモートサーバー制御
-- LinuxGSM サーバーの操作
-- システムリソース監視
+- ローカルでの LinuxGSM サーバー操作
+- `/off` / `/reboot` によるデバイスのシャットダウン・再起動
+- システムリソース監視（CPU/メモリ/ディスク）
 
 ## 機能
 
 ### 電源管理
 
-- `/on` - Wake-on-LAN でデバイスを起動
-- `/off` - SSH 経由でデバイスをシャットダウン
+- `/on` - 常時起動モードのため常にオンライン（WoL 不要）
+- `/off` - デバイスをシャットダウン
 - `/reboot` - デバイスを再起動
 - `/status` - デバイスのオンライン状態を確認
 
 ### サーバー管理
 
 - `/start <server>` - サーバーを起動
-- `/stop <server>` - サーバーを停止
-- `/gsm <server> <action>` - LinuxGSM コマンドを実行
+- `/stop <server>` - サーバーを停止（`shutdown=True` で停止後にPCシャットダウンも可能）
+- `/gsm <server> <action>` - LinuxGSM コマンドを実行（start/stop/restart/details など）
 
 ### システム監視
 
@@ -38,6 +38,8 @@ Discord 経由でサーバーの管理と電源制御を行う Python ベース�
 - Palworld
 - FTB NeoTech
 - FTB OceanBlock
+- FTB Infinity Evolved
+- Minecraft Vanilla Latest
 - Terraria
 
 ※サーバーの追加は`servers.json`に設定を追加することで可能です。
@@ -62,23 +64,13 @@ cp example.env .env
 
 ```env
 DISCORD_TOKEN=your_discord_token_here
-SSH_HOST=your_server_ip_here
-SSH_PORT=your_ssh_port_here
-SSH_USER=your_ssh_username_here
-TARGET_MAC=your_target_mac_here
-BROADCAST_IP=your_broadcast_ip_here
 PUBLIC_HOSTNAME=your_public_hostname_here (optional)
 ```
 
-| 変数名          | 説明                                       |
-| --------------- | ------------------------------------------ |
-| DISCORD_TOKEN   | Discord Bot のトークン                     |
-| SSH_HOST        | SSH 接続先のサーバー IP アドレス           |
-| SSH_PORT        | SSH 接続ポート（通常は 22）                |
-| SSH_USER        | SSH 接続ユーザー名                         |
-| TARGET_MAC      | Wake-on-LAN 対象デバイスの MAC アドレス    |
-| BROADCAST_IP    | Wake-on-LAN のブロードキャスト IP アドレス |
-| PUBLIC_HOSTNAME | 公開ホスト名（任意）                       |
+| 変数名          | 説明                                   | 必須 |
+| --------------- | -------------------------------------- | ---- |
+| DISCORD_TOKEN   | Discord Bot のトークン                 | はい |
+| PUBLIC_HOSTNAME | 公開ホスト名（/start 時の接続先表示用） | いいえ |
 
 ### 3. サーバー設定
 
@@ -89,7 +81,7 @@ PUBLIC_HOSTNAME=your_public_hostname_here (optional)
   {
     "name": "サーバー名",
     "id": "サーバーID",
-    "gsm": true/false,
+    "gsm": true,
     "info": {
       "port": ポート番号,
       "password": "パスワード"
@@ -97,6 +89,9 @@ PUBLIC_HOSTNAME=your_public_hostname_here (optional)
   }
 ]
 ```
+
+- `gsm: true` → LinuxGSM スクリプト `/home/mame/games/<id>/gs` を使用
+- `gsm: false` → `command` フィールドでカスタム起動/停止コマンドを指定
 
 ## 実行方法
 
@@ -144,19 +139,19 @@ sudo systemctl start mamepower.service
 ## 必要な権限
 
 - Discord Bot Token（Application Commands 権限必要）
-- SSH 接続権限（sudo 権限推奨）
-- Wake-on-LAN 対応ネットワーク環境
+- ゲームサーバーの実行スクリプト（`/home/mame/games/<id>/gs`）へのアクセス権限
+- シャットダウン/再起動機能を使用する場合は sudo 権限（`poweroff` / `reboot`）
 
 ## 技術スタック
 
 - Python 3.x
 - discord.py - Discord API
-- paramiko - SSH 接続
-- wakeonlan - Wake-on-LAN 機能
 - python-dotenv - 環境変数管理
+- LinuxGSM - ゲームサーバー管理（サーバー側）
 
 ## 注意事項
 
-- SSH 接続には公開鍵認証の使用が必須です
-- Wake-on-LAN 機能はネットワーク設定とハードウェア対応が必要です
+- ボットは常時起動PC上でローカル実行する前提です（SSH 接続不要）
+- LinuxGSM の tmuxception を防ぐため、ボットは `TMUX` 環境変数を除去してコマンドを実行します
+- `/off` `/reboot` はローカル実行のため、コマンド発行後にボットプロセスも終了します
 - `.env`ファイルの誤コミットに気を付けて！

@@ -4,12 +4,12 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/home/sasnews/mamepower
-ExecStart=/bin/bash /home/sasnews/mamepower/start.sh
-EnvironmentFile=/home/sasnews/mamepower/.env
+WorkingDirectory=/home/mame/bot/mamepower
+ExecStart=/bin/bash /home/mame/bot/mamepower/start.sh
+EnvironmentFile=/home/mame/bot/mamepower/.env
 Restart=always
 RestartSec=10
-User=sasnews
+User=mame
 
 [Install]
 WantedBy=multi-user.target
