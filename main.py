@@ -141,13 +141,19 @@ class RemoteClient:
         self.user = user
         self.conn_options = {"known_hosts": None}
 
-    async def execute(self, command: str) -> str:
-        """リモートコマンドを実行し、標準出力を返す"""
+    async def execute(self, command: str, allow_disconnect: bool = False) -> str:
+        """リモートコマンドを実行し、標準出力を返す
+
+        allow_disconnect=True の場合、コマンド自体が接続を切断する
+        (shutdown/reboot など) ため接続エラーを握りつぶして空文字を返す。
+        """
         try:
             async with asyncssh.connect(self.host, port=self.port, username=self.user, **self.conn_options) as conn:
                 result = await conn.run(command, check=True)
                 return result.stdout.strip() if result.stdout else ""
         except (asyncssh.Error, OSError) as e:
+            if allow_disconnect:
+                return ""
             raise ConnectionError(f"SSHコマンド実行に失敗しました: {e}")
 
     async def check_path(self, path: str) -> bool:
@@ -316,6 +322,7 @@ async def on_start(interaction: discord.Interaction, server: str):
 @cmd.describe(server="停止するサーバーを選んでください", shutdown="停止後にPCをシャットダウンしますか？ (既定: しない)")
 @cmd.choices(server=constants.server_choices)
 async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool = False):
+    global current_game_name
     await interaction.response.defer()
     
     profile = next((p for p in constants.profiles if p["id"] == server), None)
@@ -335,6 +342,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
             description=f"{profile['name']}が{content['msg']}しました",
             color=content['color']
         )
+        current_game_name = None
         await client.change_presence(activity=None)
         await server_message.edit(embed=embed)
 
@@ -345,7 +353,7 @@ async def on_stop(interaction: discord.Interaction, server: str, shutdown: bool 
 
             pc_message = await interaction.followup.send(embed=EmbedHelper.info("シャットダウン中...", "サーバー停止完了。シャットダウンを開始します..."))
             
-            await remote_client.execute("sudo poweroff")
+            await remote_client.execute("sudo poweroff", allow_disconnect=True)
 
             if await device_manager.wait_for_offline():
                 embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
@@ -374,7 +382,8 @@ async def on_gsm(interaction: discord.Interaction, server: str, action: str):
             color=constants.content_map["gsm"]["color"]
         )
 
-        if len(true_output) > 1024:
+        # Embed field の上限1024文字。コードブロック装飾(```+```)の分を差し引く
+        if len(true_output) > 1018:
             with open("log.txt", "w", encoding="utf-8") as f:
                 f.write(true_output)
             await interaction.followup.send(embed=embed, file=discord.File("log.txt"))
@@ -408,6 +417,7 @@ async def on_power_on(interaction: discord.Interaction):
 
 @tree.command(name="off", description="デバイスをシャットダウンします")
 async def on_power_off(interaction: discord.Interaction):
+    global current_game_name
     await interaction.response.defer()
     try:
         if not await device_manager.is_online():
@@ -416,10 +426,11 @@ async def on_power_off(interaction: discord.Interaction):
 
         message = await interaction.followup.send(embed=EmbedHelper.info("シャットダウン中...", "シャットダウンを開始します。完了までお待ちください..."))
         
-        await remote_client.execute("sudo poweroff")
+        await remote_client.execute("sudo poweroff", allow_disconnect=True)
 
         if await device_manager.wait_for_offline():
             embed = EmbedHelper.success("シャットダウン成功", "*`MAME G.S.`*がオフラインになりました。")
+            current_game_name = None
             await client.change_presence(status=discord.Status.idle)
         else:
             embed = EmbedHelper.warning("シャットダウンタイムアウト", f"{config.ping_timeout}秒以内に*`MAME G.S.`*がオンラインになりませんでした。")
@@ -438,7 +449,7 @@ async def on_reboot(interaction: discord.Interaction):
             return
 
         message = await interaction.followup.send(embed=EmbedHelper.info("再起動中...", "再起動コマンドを送信しました。デバイスがオンラインになるまで待機します..."))
-        await remote_client.execute("sudo reboot")
+        await remote_client.execute("sudo reboot", allow_disconnect=True)
 
         # オフライン->オンラインになるのを待つ
         await asyncio.sleep(10) # シャットダウンシーケンスのための待機
